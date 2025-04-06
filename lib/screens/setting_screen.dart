@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../providers/recent_provider.dart';
 import '../../providers/filter_provider.dart';
 import 'package:path_provider/path_provider.dart';
@@ -353,16 +354,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ),
                       const Divider(),
                       ListTile(
-                        title: const Text('Source Code'),
-                        subtitle: const Text('View the source code on GitHub'),
-                        trailing: ElevatedButton.icon(
-                          icon: const Icon(Icons.open_in_new, size: 16),
-                          label: const Text('Open'),
-                          onPressed: () {
-                            // Open GitHub link
-                          },
-                        ),
-                      ),
+  title: const Text('Source Code'),
+  subtitle: const Text('View the source code on GitHub'),
+  trailing: ElevatedButton.icon(
+    icon: const Icon(Icons.open_in_new, size: 16),
+    label: const Text('Open'),
+    onPressed: () async {
+      const url = 'https://github.com/pang-parserbot/project_summarise';
+      if (await canLaunchUrl(Uri.parse(url))) {
+        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      } else {
+        // Handle error - show a snackbar or dialog
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not open the GitHub page')),
+          );
+        }
+      }
+    },
+  ),
+),
                       const Divider(),
                       const ListTile(
                         title: Text('License'),
