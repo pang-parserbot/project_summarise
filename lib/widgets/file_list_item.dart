@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
-import '../../models/file_item.dart';
-import '../../utils/file_utils.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:project_summarise/models/file_item.dart';
+import 'package:project_summarise/providers/code_summary_provider.dart' show summaryOptionsProvider;
+import 'package:project_summarise/utils/file_utils.dart';
 
-class FileListItem extends StatelessWidget {
+class FileListItem extends ConsumerWidget {
   final FileItem item;
   final VoidCallback onTap;
 
@@ -13,7 +15,12 @@ class FileListItem extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final summaryOptions = ref.watch(summaryOptionsProvider);
+    final isExcluded = item.isFolder 
+        ? summaryOptions.excludedFolders.contains(item.name)
+        : summaryOptions.excludedFiles.contains(item.name);
+
     return ListTile(
       leading: _buildIcon(),
       title: Text(
@@ -22,7 +29,50 @@ class FileListItem extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
       ),
       subtitle: _buildSubtitle(),
-      trailing: item.isFile ? _buildFileDetails() : null,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Include in summary switch
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Include:', 
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Switch(
+                value: !isExcluded,
+                onChanged: (value) {
+                  if (item.isFolder) {
+                    if (value) {
+                      // Include folder (remove from excluded)
+                      ref.read(summaryOptionsProvider.notifier).removeExcludedFolder(item.name);
+                    } else {
+                      // Exclude folder (add to excluded)
+                      ref.read(summaryOptionsProvider.notifier).addExcludedFolder(item.name);
+                    }
+                  } else {
+                    if (value) {
+                      // Include file (remove from excluded)
+                      ref.read(summaryOptionsProvider.notifier).removeExcludedFile(item.name);
+                    } else {
+                      // Exclude file (add to excluded)
+                      ref.read(summaryOptionsProvider.notifier).addExcludedFile(item.name);
+                    }
+                  }
+                },
+                activeColor: Theme.of(context).colorScheme.primary,
+              ),
+            ],
+          ),
+          const SizedBox(width: 8),
+          if (item.isFile) _buildFileDetails(),
+        ],
+      ),
       onTap: onTap,
     );
   }
@@ -32,7 +82,7 @@ class FileListItem extends StatelessWidget {
       return const Icon(Icons.folder, color: Colors.amber);
     }
     
-    // 根据文件类型返回不同图标
+    // Return different icons based on file type
     if (item.extension != null) {
       switch (item.extension!.toLowerCase()) {
         case 'dart':
@@ -58,7 +108,7 @@ class FileListItem extends StatelessWidget {
   }
 
   Widget _buildSubtitle() {
-    final lastModified = '修改: ${_formatDate(item.modifiedTime)}';
+    final lastModified = 'Modified: ${_formatDate(item.modifiedTime)}';
     
     if (item.isFile) {
       return Text('$lastModified · ${FileUtils.formatFileSize(item.size)}');
@@ -68,28 +118,18 @@ class FileListItem extends StatelessWidget {
   }
 
   Widget _buildFileDetails() {
-    return SizedBox(
-      width: 60,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          if (item.extension != null)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                item.extension!.toUpperCase(),
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-        ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.blue.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        item.extension?.toUpperCase() ?? '',
+        style: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     );
   }
@@ -101,13 +141,13 @@ class FileListItem extends StatelessWidget {
     if (difference.inDays == 0) {
       if (difference.inHours == 0) {
         if (difference.inMinutes == 0) {
-          return '刚才';
+          return 'Just now';
         }
-        return '${difference.inMinutes}分钟前';
+        return '${difference.inMinutes} minutes ago';
       }
-      return '${difference.inHours}小时前';
+      return '${difference.inHours} hours ago';
     } else if (difference.inDays < 7) {
-      return '${difference.inDays}天前';
+      return '${difference.inDays} days ago';
     } else {
       return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
     }

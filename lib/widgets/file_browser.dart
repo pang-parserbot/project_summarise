@@ -9,11 +9,25 @@ import '../../providers/recent_provider.dart';
 import '../screens/code_viewer_screen.dart';
 import 'file_list_item.dart';
 
-class FileBrowser extends ConsumerWidget {
+class FileBrowser extends ConsumerStatefulWidget {
   const FileBrowser({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<FileBrowser> createState() => _FileBrowserState();
+}
+
+class _FileBrowserState extends ConsumerState<FileBrowser> {
+  // 主列表控制器
+  final ScrollController _listScrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _listScrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final currentPath = ref.watch(currentPathProvider);
     final fileSystemState = ref.watch(fileSystemProvider);
     
@@ -53,9 +67,10 @@ class FileBrowser extends ConsumerWidget {
   }
 
   Widget _buildPathNavigator(BuildContext context, WidgetRef ref, String currentPath) {
-    final pathParts = path.split(currentPath);
+    final pathSegments = _getPathSegments(currentPath);
     final isFavorite = ref.watch(favoritesProvider)
       .any((item) => item.path == currentPath && item.isFavorite);
+    final canNavigateBack = ref.watch(fileSystemProvider.notifier).canGoBack;
     
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
@@ -70,35 +85,60 @@ class FileBrowser extends ConsumerWidget {
       width: double.infinity,
       child: Row(
         children: [
-          // Path breadcrumbs
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  if (Platform.isWindows && pathParts.length > 1)
-                    _buildPathButton(context, ref, pathParts[0] + '\\', pathParts[0])
-                  else if (Platform.isWindows)
-                    _buildPathButton(context, ref, pathParts[0], pathParts[0])
-                  else
-                    _buildPathButton(context, ref, '/', '/'),
-                  
-                  for (int i = Platform.isWindows ? 1 : 1; i < pathParts.length; i++) 
-                    Row(
-                      children: [
-                        const Icon(Icons.chevron_right, size: 16),
-                        _buildPathButton(
-                          context, 
-                          ref, 
-                          path.joinAll(pathParts.sublist(0, i + 1)), 
-                          pathParts[i],
-                        ),
-                      ],
-                    ),
-                ],
-              ),
+          // Back button
+          IconButton(
+            icon: const Icon(Icons.arrow_back),
+            tooltip: 'Go back (Ctrl+Z)',
+            onPressed: canNavigateBack 
+                ? () => ref.read(fileSystemProvider.notifier).navigateBack()
+                : null,
+          ),
+          
+          // Up navigation button
+          IconButton(
+            icon: const Icon(Icons.arrow_upward),
+            tooltip: 'Go to parent folder (Alt+Up)',
+            onPressed: () => ref.read(fileSystemProvider.notifier).navigateUp(),
+          ),
+          
+          // Project name / root folder indicator
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.5),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              pathSegments.isNotEmpty ? pathSegments[0] : path.basename(currentPath),
+              style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           ),
+          
+          // Path breadcrumbs - 移除滚动条，简化结构
+          if (pathSegments.length > 1)
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    for (int i = 1; i < pathSegments.length; i++) 
+                      Row(
+                        children: [
+                          const Icon(Icons.chevron_right, size: 16),
+                          _buildPathButton(
+                            context, 
+                            ref, 
+                            _buildPathFromSegments(pathSegments.sublist(0, i + 1), currentPath), 
+                            pathSegments[i],
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            )
+          else
+            const Spacer(),
           
           // Favorite button
           IconButton(
@@ -121,10 +161,47 @@ class FileBrowser extends ConsumerWidget {
     );
   }
 
+  // Get simplified path segments for display
+  List<String> _getPathSegments(String fullPath) {
+    final segments = <String>[];
+    
+    // Get the project name (last folder in the path)
+    final projectName = path.basename(fullPath);
+    segments.add(projectName);
+    
+    // Get subdirectories if any
+    final pathParts = path.split(fullPath);
+    final rootIndex = pathParts.indexOf(projectName);
+    
+    if (rootIndex >= 0 && rootIndex < pathParts.length - 1) {
+      segments.addAll(pathParts.sublist(rootIndex + 1));
+    }
+    
+    return segments;
+  }
+  
+  // Build full path from segments
+  String _buildPathFromSegments(List<String> segments, String currentFullPath) {
+    final fullParts = path.split(currentFullPath);
+    final projectName = segments[0];
+    final rootIndex = fullParts.indexOf(projectName);
+    
+    if (rootIndex >= 0) {
+      final basePath = path.joinAll(fullParts.sublist(0, rootIndex + 1));
+      if (segments.length > 1) {
+        return path.join(basePath, path.joinAll(segments.sublist(1)));
+      }
+      return basePath;
+    }
+    
+    return currentFullPath;
+  }
+
   Widget _buildPathButton(BuildContext context, WidgetRef ref, String pathToNavigate, String label) {
     return TextButton(
       onPressed: () {
-        ref.read(currentPathProvider.notifier).state = pathToNavigate;
+        // Use navigateToPath for proper history tracking
+        ref.read(fileSystemProvider.notifier).navigateToPath(pathToNavigate);
         ref.read(recentPathsProvider.notifier).addRecentPath(pathToNavigate);
       },
       style: TextButton.styleFrom(
@@ -160,11 +237,15 @@ class FileBrowser extends ConsumerWidget {
       );
     }
     
+    // 使用primary: true代替Scrollbar
     return RefreshIndicator(
       onRefresh: () async {
         ref.read(fileSystemProvider.notifier).refresh();
       },
       child: ListView.builder(
+        controller: _listScrollController,
+        primary: false, // 避免使用PrimaryScrollController
+        physics: const AlwaysScrollableScrollPhysics(),
         itemCount: items.length,
         itemBuilder: (context, index) {
           final item = items[index];
@@ -172,7 +253,8 @@ class FileBrowser extends ConsumerWidget {
             item: item,
             onTap: () {
               if (item.isFolder) {
-                ref.read(currentPathProvider.notifier).state = item.path;
+                // Use navigateToPath for proper history tracking
+                ref.read(fileSystemProvider.notifier).navigateToPath(item.path);
                 ref.read(recentPathsProvider.notifier).addRecentPath(item.path);
               } else {
                 Navigator.push(

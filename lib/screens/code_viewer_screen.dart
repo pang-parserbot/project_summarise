@@ -28,6 +28,22 @@ class _CodeViewerScreenState extends ConsumerState<CodeViewerScreen> {
   bool _wordWrap = false;
   double _fontSize = 14.0;
   
+  // 添加ScrollController实例
+  final ScrollController _verticalScrollController = ScrollController();
+  final ScrollController _horizontalScrollController = ScrollController();
+  final ScrollController _imageScrollController = ScrollController();
+  final ScrollController _genericScrollController = ScrollController();
+  
+  @override
+  void dispose() {
+    // 释放ScrollController
+    _verticalScrollController.dispose();
+    _horizontalScrollController.dispose();
+    _imageScrollController.dispose();
+    _genericScrollController.dispose();
+    super.dispose();
+  }
+  
   @override
   Widget build(BuildContext context) {
     final codeAsync = ref.watch(codeProvider(widget.filePath));
@@ -76,82 +92,80 @@ class _CodeViewerScreenState extends ConsumerState<CodeViewerScreen> {
     );
   }
   
-  // Updated _buildAppBarActions in code_viewer_screen.dart:
-
-Widget _buildAppBarActions(AsyncValue<String> codeAsync) {
-  return Row(
-    children: [
-      IconButton(
-        icon: Icon(_wordWrap ? Icons.wrap_text : Icons.wrap_text_outlined),
-        tooltip: _wordWrap ? 'Disable word wrap' : 'Enable word wrap',
-        onPressed: () {
-          setState(() {
-            _wordWrap = !_wordWrap;
-          });
-        },
-      ),
-      IconButton(
-        icon: Icon(_showLineNumbers ? Icons.numbers : Icons.numbers_outlined),
-        tooltip: _showLineNumbers ? 'Hide line numbers' : 'Show line numbers',
-        onPressed: () {
-          setState(() {
-            _showLineNumbers = !_showLineNumbers;
-          });
-        },
-      ),
-      PopupMenuButton(
-        icon: const Icon(Icons.text_fields),
-        tooltip: 'Font size',
-        itemBuilder: (context) => [
-          const PopupMenuItem(
-            value: 12.0,
-            child: Text('Small (12px)'),
-          ),
-          const PopupMenuItem(
-            value: 14.0,
-            child: Text('Medium (14px)'),
-          ),
-          const PopupMenuItem(
-            value: 16.0,
-            child: Text('Large (16px)'),
-          ),
-          const PopupMenuItem(
-            value: 18.0,
-            child: Text('Extra Large (18px)'),
-          ),
-        ],
-        onSelected: (value) {
-          setState(() {
-            _fontSize = value;
-          });
-        },
-      ),
-      // Make the copy button more prominent
-      ElevatedButton.icon(
-        icon: const Icon(Icons.copy),
-        label: const Text('Copy Code'),
-        onPressed: () {
-          codeAsync.whenData((code) {
-            Clipboard.setData(ClipboardData(text: code));
+  Widget _buildAppBarActions(AsyncValue<String> codeAsync) {
+    return Row(
+      children: [
+        IconButton(
+          icon: Icon(_wordWrap ? Icons.wrap_text : Icons.wrap_text_outlined),
+          tooltip: _wordWrap ? 'Disable word wrap' : 'Enable word wrap',
+          onPressed: () {
+            setState(() {
+              _wordWrap = !_wordWrap;
+            });
+          },
+        ),
+        IconButton(
+          icon: Icon(_showLineNumbers ? Icons.numbers : Icons.numbers_outlined),
+          tooltip: _showLineNumbers ? 'Hide line numbers' : 'Show line numbers',
+          onPressed: () {
+            setState(() {
+              _showLineNumbers = !_showLineNumbers;
+            });
+          },
+        ),
+        PopupMenuButton(
+          icon: const Icon(Icons.text_fields),
+          tooltip: 'Font size',
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: 12.0,
+              child: Text('Small (12px)'),
+            ),
+            const PopupMenuItem(
+              value: 14.0,
+              child: Text('Medium (14px)'),
+            ),
+            const PopupMenuItem(
+              value: 16.0,
+              child: Text('Large (16px)'),
+            ),
+            const PopupMenuItem(
+              value: 18.0,
+              child: Text('Extra Large (18px)'),
+            ),
+          ],
+          onSelected: (value) {
+            setState(() {
+              _fontSize = value;
+            });
+          },
+        ),
+        // Make the copy button more prominent
+        ElevatedButton.icon(
+          icon: const Icon(Icons.copy),
+          label: const Text('Copy Code'),
+          onPressed: () {
+            codeAsync.whenData((code) {
+              Clipboard.setData(ClipboardData(text: code));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Copied to clipboard')),
+              );
+            });
+          },
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          icon: const Icon(Icons.download),
+          tooltip: 'Export with comments',
+          onPressed: () {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Copied to clipboard')),
+              const SnackBar(content: Text('Export feature coming soon')),
             );
-          });
-        },
-      ),
-      const SizedBox(width: 8),
-      IconButton(
-        icon: const Icon(Icons.download),
-        tooltip: 'Export with comments',
-        onPressed: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Export feature coming soon')),
-          );
-        },
-      ),
-    ],
-  );
-}
+          },
+        ),
+      ],
+    );
+  }
 
   Widget _buildCodeViewer(BuildContext context, String code, String? extension) {
     if (!FileUtils.isCodeFile(extension)) {
@@ -209,136 +223,133 @@ Widget _buildAppBarActions(AsyncValue<String> codeAsync) {
     
     // If word wrap is enabled, use a different layout
     if (_wordWrap) {
-      return Scrollbar(
-        thumbVisibility: true,
-        child: SingleChildScrollView(
-          child: Container(
-            margin: const EdgeInsets.only(top: 8),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Line numbers (if enabled)
-                if (_showLineNumbers)
-                  Container(
-                    width: 64,
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? const Color(0xFF2D2D2D)
-                        : const Color(0xFFF0F0F0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        for (int i = 0; i < lines.length; i++)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-                            alignment: Alignment.centerRight,
-                            child: Text(
-                              '${i + 1}',
-                              style: TextStyle(
-                                fontFamily: 'monospace',
-                                fontSize: _fontSize - 2,
-                                color: Theme.of(context).brightness == Brightness.dark
-                                    ? Colors.grey[400]
-                                    : Colors.grey[700],
-                              ),
+      return SingleChildScrollView(
+        controller: _verticalScrollController,
+        child: Container(
+          margin: const EdgeInsets.only(top: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Line numbers (if enabled)
+              if (_showLineNumbers)
+                Container(
+                  width: 64,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? const Color(0xFF2D2D2D)
+                      : const Color(0xFFF0F0F0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      for (int i = 0; i < lines.length; i++)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            '${i + 1}',
+                            style: TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: _fontSize - 2,
+                              color: Theme.of(context).brightness == Brightness.dark
+                                  ? Colors.grey[400]
+                                  : Colors.grey[700],
                             ),
                           ),
-                      ],
-                    ),
-                  ),
-                
-                // Code content
-                Expanded(
-                  child: Container(
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? const Color(0xFF1E1E1E)
-                        : Colors.white,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        for (int i = 0; i < lines.length; i++)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-                            child: SelectableText(
-                              lines[i],
-                              style: TextStyle(
-                                fontFamily: 'monospace',
-                                fontSize: _fontSize,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
+                        ),
+                    ],
                   ),
                 ),
-              ],
-            ),
+              
+              // Code content
+              Expanded(
+                child: Container(
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? const Color(0xFF1E1E1E)
+                      : Colors.white,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (int i = 0; i < lines.length; i++)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                          child: SelectableText(
+                            lines[i],
+                            style: TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: _fontSize,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       );
     }
     
     // No word wrap - horizontal scrolling
-    return Scrollbar(
-      thumbVisibility: true,
+    return SingleChildScrollView(
+      controller: _horizontalScrollController,
+      scrollDirection: Axis.horizontal,
       child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: SingleChildScrollView(
-          child: Container(
-            margin: const EdgeInsets.only(top: 8),
-            color: Theme.of(context).brightness == Brightness.dark
-                ? const Color(0xFF1E1E1E)
-                : Colors.white,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Line numbers (if enabled)
-                if (_showLineNumbers)
-                  Container(
-                    width: 64,
-                    color: Theme.of(context).brightness == Brightness.dark
-                        ? const Color(0xFF2D2D2D)
-                        : const Color(0xFFF0F0F0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        for (int i = 0; i < lines.length; i++)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-                            alignment: Alignment.centerRight,
-                            child: Text(
-                              '${i + 1}',
-                              style: TextStyle(
-                                fontFamily: 'monospace',
-                                fontSize: _fontSize - 2,
-                                color: Theme.of(context).brightness == Brightness.dark
-                                    ? Colors.grey[400]
-                                    : Colors.grey[700],
-                              ),
+        controller: _verticalScrollController,
+        child: Container(
+          margin: const EdgeInsets.only(top: 8),
+          color: Theme.of(context).brightness == Brightness.dark
+              ? const Color(0xFF1E1E1E)
+              : Colors.white,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Line numbers (if enabled)
+              if (_showLineNumbers)
+                Container(
+                  width: 64,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? const Color(0xFF2D2D2D)
+                      : const Color(0xFFF0F0F0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      for (int i = 0; i < lines.length; i++)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            '${i + 1}',
+                            style: TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: _fontSize - 2,
+                              color: Theme.of(context).brightness == Brightness.dark
+                                  ? Colors.grey[400]
+                                  : Colors.grey[700],
                             ),
                           ),
-                      ],
-                    ),
+                        ),
+                    ],
                   ),
-                
-                // Code content
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (int i = 0; i < lines.length; i++)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-                        child: SelectableText(
-                          lines[i],
-                          style: TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: _fontSize,
-                          ),
+                ),
+              
+              // Code content
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (int i = 0; i < lines.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                      child: SelectableText(
+                        lines[i],
+                        style: TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: _fontSize,
                         ),
                       ),
-                  ],
-                ),
-              ],
-            ),
+                    ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
@@ -348,6 +359,7 @@ Widget _buildAppBarActions(AsyncValue<String> codeAsync) {
   Widget _buildImageViewer() {
     return Center(
       child: SingleChildScrollView(
+        controller: _imageScrollController,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -423,6 +435,7 @@ Widget _buildAppBarActions(AsyncValue<String> codeAsync) {
           const SizedBox(height: 16),
           Expanded(
             child: SingleChildScrollView(
+              controller: _genericScrollController,
               child: SelectableText(
                 content,
                 style: TextStyle(

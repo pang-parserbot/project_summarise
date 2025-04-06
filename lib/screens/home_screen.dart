@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:project_summarise/models/recent_path.dart';
 import 'package:project_summarise/providers/code_summary_provider.dart';
+import 'package:project_summarise/providers/settings_provider.dart';
 import 'package:project_summarise/screens/setting_screen.dart';
 import 'package:project_summarise/widgets/code_summary_exporter.dart';
 import '../widgets/file_browser.dart';
@@ -10,6 +12,15 @@ import '../widgets/filter_panel.dart';
 import '../../providers/file_system_provider.dart';
 import '../../providers/recent_provider.dart';
 import '../../providers/favorites_provider.dart';
+
+// 导航意图定义
+class NavigateBackIntent extends Intent {
+  const NavigateBackIntent();
+}
+
+class NavigateUpIntent extends Intent {
+  const NavigateUpIntent();
+}
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -22,50 +33,124 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   bool _showFilterPanel = false;
   int _selectedIndex = 0;
   
+  // 处理导航回退
+  void _handleNavigateBack() {
+    if (ref.read(currentPathProvider) != null) {
+      ref.read(fileSystemProvider.notifier).navigateBack();
+    }
+  }
+  
+  // 处理向上导航
+  void _handleNavigateUp() {
+    if (ref.read(currentPathProvider) != null) {
+      ref.read(fileSystemProvider.notifier).navigateUp();
+    }
+  }
+  
   @override
   Widget build(BuildContext context) {
     final currentPath = ref.watch(currentPathProvider);
     final recentPaths = ref.watch(recentPathsProvider);
     final favorites = ref.watch(favoritesProvider);
+    final canNavigateBack = currentPath != null && 
+                           ref.watch(fileSystemProvider.notifier).canGoBack;
     
-    return Scaffold(
-      body: Row(
-        children: [
-          // Custom sidebar instead of NavigationRail
-          _buildSidebar(),
+  final settings = ref.watch(settingsProvider);
+  
+  // 使用来自设置的键盘快捷键
+  final backShortcut = settings.keyboardShortcuts['navigateBack'];
+  final upShortcut = settings.keyboardShortcuts['navigateUp'];
+    return Shortcuts(
+      
+    shortcuts: <LogicalKeySet, Intent>{
+      // 基于设置的回退快捷键
+      LogicalKeySet.fromSet({
+        ...backShortcut?.currentModifiers ?? {},
+        backShortcut?.currentKey ?? LogicalKeyboardKey.keyZ,
+      }): const NavigateBackIntent(),
+      
+      // 基于设置的向上导航快捷键
+      LogicalKeySet.fromSet({
+        ...upShortcut?.currentModifiers ?? {},
+        upShortcut?.currentKey ?? LogicalKeyboardKey.arrowUp,
+      }): const NavigateUpIntent(),
+      
+      // 额外的备选快捷键
+      LogicalKeySet(LogicalKeyboardKey.backspace): const NavigateUpIntent(),
+    },
+      
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          NavigateBackIntent: CallbackAction<NavigateBackIntent>(
+            onInvoke: (NavigateBackIntent intent) {
+              _handleNavigateBack();
+              return null;
+            },
+          ),
+          NavigateUpIntent: CallbackAction<NavigateUpIntent>(
+            onInvoke: (NavigateUpIntent intent) {
+              _handleNavigateUp();
+              return null;
+            },
+          ),
+        },
+        child: Scaffold(
           
-          // Main content area with optional filter panel
-          Expanded(
-            child: Column(
-              children: [
-                // App bar with path and actions
-                _buildAppBar(currentPath),
-                
-                // Filter panel (collapsible)
-                if (_showFilterPanel)
-                  const FilterPanel(),
-                  
-                // Main content (file browser or landing)
-                Expanded(
-                  child: _selectedIndex == 0
-                    ? (currentPath != null 
-                        ? const FileBrowser() 
-                        : _buildWelcomeScreen(recentPaths, favorites))
-                    : _selectedIndex == 1
-                      ? _buildRecentScreen(recentPaths)
-                      : _selectedIndex == 2
-                        ? _buildFavoritesScreen(favorites)
-                        : const SizedBox(), // Should never reach here as settings opens a new screen
+          body: Row(
+            children: [
+              // Custom sidebar instead of NavigationRail
+              _buildSidebar(canNavigateBack),
+              
+              // Main content area with optional filter panel
+              Expanded(
+                child: Column(
+                  children: [
+                    // App bar with path and actions
+                    _buildAppBar(currentPath),
+                    
+                    // Filter panel (collapsible)
+                    if (_showFilterPanel)
+                      const FilterPanel(),
+                      
+                    // Main content (file browser or landing)
+                    Expanded(
+                      child: _selectedIndex == 0
+                        ? (currentPath != null 
+                            ? const FileBrowser() 
+                            : _buildWelcomeScreen(recentPaths, favorites))
+                        : _selectedIndex == 1
+                          ? _buildRecentScreen(recentPaths)
+                          : _selectedIndex == 2
+                            ? _buildFavoritesScreen(favorites)
+                            : const SizedBox(), // Should never reach here as settings opens a new screen
+                    ),
+                  ],
                 ),
+              ),
+            ],
+          ),
+          
+          bottomNavigationBar: currentPath != null ? Container(
+            height: 28, // 增加高度使其更明显
+            color: Theme.of(context).colorScheme.surfaceVariant,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Text(
+                  'Current path: $currentPath',
+                  style: const TextStyle(fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const Spacer(),
               ],
             ),
-          ),
-        ],
+          ) : null,
+        ),
       ),
     );
   }
 
-  Widget _buildSidebar() {
+  Widget _buildSidebar(bool canNavigateBack) {
     final isWide = MediaQuery.of(context).size.width > 1200;
     
     return Container(
@@ -123,24 +208,71 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           ),
           
-          // Open folder button at bottom of sidebar
-          Padding(
-            padding: const EdgeInsets.all(16),
+          // 显示快捷键信息
+          if (canNavigateBack)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              margin: const EdgeInsets.only(bottom: 4),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (isWide) ...[
+                    const Text('Back: ', style: TextStyle(fontSize: 12)),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surfaceVariant,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text('Ctrl+Z', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                    ),
+                  ] else
+                    Tooltip(
+                      message: 'Navigate back (Ctrl+Z)',
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surfaceVariant,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Icon(Icons.keyboard_return, size: 16),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          
+          // 改进后的Open folder按钮设计
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            margin: const EdgeInsets.all(8),
             child: ElevatedButton(
               onPressed: _openDirectory,
               style: ElevatedButton.styleFrom(
-                padding: isWide
-                  ? const EdgeInsets.symmetric(vertical: 12, horizontal: 16)
-                  : const EdgeInsets.all(12),
-                minimumSize: const Size(0, 0),
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                elevation: 2,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
               child: Row(
-                mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const Icon(Icons.folder_open, size: 20),
                   if (isWide) const SizedBox(width: 8),
-                  if (isWide) const Text('Open Folder'),
+                  if (isWide) const Text(
+                    'Open Folder',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -191,120 +323,155 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
   
-  // In home_screen.dart, add this to _buildAppBar():
-
-Widget _buildAppBar(String? currentPath) {
-  return Container(
-    height: 60,
-    padding: const EdgeInsets.symmetric(horizontal: 16),
-    decoration: BoxDecoration(
-      color: Theme.of(context).colorScheme.surface,
-    ),
-    child: Row(
-      children: [
-        // Current path display with breadcrumbs
-        if (currentPath != null)
-          Expanded(
-            child: Text(
-              'Location: ${_getDisplayPath(currentPath)}',
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
+  Widget _buildAppBar(String? currentPath) {
+    return Container(
+      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+      ),
+      child: Row(
+        children: [
+          // 移除回退按钮，因为FileBrowser中已有
+        
+          // Current path display with breadcrumbs
+          if (currentPath != null)
+            Expanded(
+              child: Text(
+                'Location: ${_getDisplayPath(currentPath)}',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          )
-        else
-          const Expanded(
-            child: Text(
-              'Code Browser',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
+            )
+          else
+            const Expanded(
+              child: Text(
+                'Code Browser',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
-          ),
           
-        // Action buttons
-        IconButton(
-          icon: Icon(
-            _showFilterPanel ? Icons.filter_list_off : Icons.filter_list,
-          ),
-          tooltip: _showFilterPanel ? 'Hide Filters' : 'Show Filters',
-          onPressed: () {
-            setState(() {
-              _showFilterPanel = !_showFilterPanel;
-            });
-          },
-        ),
-        const SizedBox(width: 8),
-        if (currentPath != null) ...[
+          // Action buttons
           IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh',
+            icon: Icon(
+              _showFilterPanel ? Icons.filter_list_off : Icons.filter_list,
+            ),
+            tooltip: _showFilterPanel ? 'Hide Filters' : 'Show Filters',
             onPressed: () {
-              ref.read(fileSystemProvider.notifier).refresh();
+              setState(() {
+                _showFilterPanel = !_showFilterPanel;
+              });
             },
           ),
           const SizedBox(width: 8),
-          // Add this button for code summary
-          // In home_screen.dart, update the button to open the summary dialog:
-
-ElevatedButton.icon(
-  icon: const Icon(Icons.summarize),
-  label: const Text('Code Summary'),
-  onPressed: () {
-    // Reset the summary state before showing the dialog
-    ref.read(summaryGeneratorProvider.notifier).reset();
-    
-    showDialog(
-      context: context,
-      builder: (context) => CodeSummaryExporter(
-        directoryPath: currentPath!,
+          if (currentPath != null) ...[
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Refresh',
+              onPressed: () {
+                ref.read(fileSystemProvider.notifier).refresh();
+              },
+            ),
+            const SizedBox(width: 8),
+            // Code summary button
+            ElevatedButton.icon(
+              icon: const Icon(Icons.summarize),
+              label: const Text('Code Summary'),
+              onPressed: () {
+                // Reset the summary state before showing the dialog
+                ref.read(summaryGeneratorProvider.notifier).reset();
+                
+                showDialog(
+                  context: context,
+                  builder: (context) => CodeSummaryExporter(
+                    directoryPath: currentPath!,
+                  ),
+                );
+              },
+            ),
+            const SizedBox(width: 8),
+          ],
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) {
+              switch (value) {
+                case 'settings':
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const SettingsScreen()),
+                  );
+                  break;
+                case 'clearRecent':
+                  ref.read(recentPathsProvider.notifier).clearRecentPaths();
+                  break;
+                case 'keyboardShortcuts':
+                  _showKeyboardShortcutsDialog();
+                  break;
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'settings',
+                child: ListTile(
+                  leading: Icon(Icons.settings),
+                  title: Text('Settings'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'clearRecent',
+                child: ListTile(
+                  leading: Icon(Icons.delete_sweep),
+                  title: Text('Clear Recent'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'keyboardShortcuts',
+                child: ListTile(
+                  leading: Icon(Icons.keyboard),
+                  title: Text('Keyboard Shortcuts'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
-  },
-),
-          const SizedBox(width: 8),
-        ],
-        PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert),
-          onSelected: (value) {
-            switch (value) {
-              case 'settings':
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const SettingsScreen()),
-                );
-                break;
-              case 'clearRecent':
-                ref.read(recentPathsProvider.notifier).clearRecentPaths();
-                break;
-            }
-          },
-          itemBuilder: (context) => [
-            const PopupMenuItem(
-              value: 'settings',
-              child: ListTile(
-                leading: Icon(Icons.settings),
-                title: Text('Settings'),
-                contentPadding: EdgeInsets.zero,
-              ),
-            ),
-            const PopupMenuItem(
-              value: 'clearRecent',
-              child: ListTile(
-                leading: Icon(Icons.delete_sweep),
-                title: Text('Clear Recent'),
-                contentPadding: EdgeInsets.zero,
-              ),
-            ),
+  }
+  
+  // 添加一个显示键盘快捷键对话框的方法
+  void _showKeyboardShortcutsDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Keyboard Shortcuts'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: const [
+            _ShortcutItem(shortcut: 'Ctrl+Z', description: 'Navigate back to previous folder'),
+            _ShortcutItem(shortcut: 'Alt+Left', description: 'Navigate back to previous folder'),
+            _ShortcutItem(shortcut: 'Alt+Up', description: 'Navigate to parent folder'),
+            _ShortcutItem(shortcut: 'Backspace', description: 'Navigate to parent folder'),
           ],
         ),
-      ],
-    ),
-  );
-}
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
   
   Widget _buildWelcomeScreen(List<RecentPath> recentPaths, List<RecentPath> favorites) {
     return Padding(
@@ -361,6 +528,12 @@ ElevatedButton.icon(
                       label: 'Add favorites for quick access',
                       onPressed: null,
                     ),
+                    const SizedBox(height: 12),
+                    _buildActionButton(
+                      icon: Icons.keyboard,
+                      label: 'View keyboard shortcuts',
+                      onPressed: _showKeyboardShortcutsDialog,
+                    ),
                   ],
                 ),
               ),
@@ -403,7 +576,7 @@ ElevatedButton.icon(
                           ...recentPaths.take(5).map((path) => _buildPathItem(
                             path.path,
                             onTap: () {
-                              ref.read(currentPathProvider.notifier).state = path.path;
+                              ref.read(fileSystemProvider.notifier).navigateToPath(path.path);
                               ref.read(recentPathsProvider.notifier).addRecentPath(path.path);
                             },
                           )),
@@ -443,7 +616,7 @@ ElevatedButton.icon(
                             path.path,
                             isFavorite: true,
                             onTap: () {
-                              ref.read(currentPathProvider.notifier).state = path.path;
+                              ref.read(fileSystemProvider.notifier).navigateToPath(path.path);
                               ref.read(recentPathsProvider.notifier).addRecentPath(path.path);
                             },
                           )),
@@ -533,7 +706,7 @@ ElevatedButton.icon(
               ],
             ),
             onTap: () {
-              ref.read(currentPathProvider.notifier).state = path.path;
+              ref.read(fileSystemProvider.notifier).navigateToPath(path.path);
               ref.read(recentPathsProvider.notifier).addRecentPath(path.path);
               setState(() => _selectedIndex = 0); // Switch to explorer
             },
@@ -598,7 +771,7 @@ ElevatedButton.icon(
               tooltip: 'Remove from favorites',
             ),
             onTap: () {
-              ref.read(currentPathProvider.notifier).state = path.path;
+              ref.read(fileSystemProvider.notifier).navigateToPath(path.path);
               ref.read(recentPathsProvider.notifier).addRecentPath(path.path);
               setState(() => _selectedIndex = 0); // Switch to explorer
             },
@@ -677,9 +850,51 @@ ElevatedButton.icon(
   Future<void> _openDirectory() async {
     final selectedDirectory = await FilePicker.platform.getDirectoryPath();
     if (selectedDirectory != null) {
-      ref.read(currentPathProvider.notifier).state = selectedDirectory;
+      ref.read(fileSystemProvider.notifier).navigateToPath(selectedDirectory);
       ref.read(recentPathsProvider.notifier).addRecentPath(selectedDirectory);
       setState(() => _selectedIndex = 0); // Switch to explorer
     }
+  }
+}
+
+// 添加一个快捷键显示的组件
+class _ShortcutItem extends StatelessWidget {
+  final String shortcut;
+  final String description;
+  
+  const _ShortcutItem({
+    required this.shortcut,
+    required this.description,
+  });
+  
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceVariant,
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: Theme.of(context).colorScheme.outline.withOpacity(0.5)),
+            ),
+            child: Text(
+              shortcut,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontFamily: 'monospace',
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Text(description),
+          ),
+        ],
+      ),
+    );
   }
 }
